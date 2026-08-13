@@ -214,8 +214,16 @@
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .tree-file.html { color: #2c2c2c; cursor: pointer; }
-        .tree-file.html:hover { background: #f3ece1; color: #111; }
-        .tree-file.plain { opacity: 0.55; cursor: default; }
+        .tree-file.file { cursor: pointer; }
+        .tree-file.html:hover, .tree-file.file:hover { background: #f3ece1; color: #111; }
+        .tree-item.file-item { display: flex; align-items: center; }
+        .tree-item.file-item > .tree-file { flex: 1; }
+        .tree-download {
+            flex-shrink: 0; margin-right: 6px; padding: 2px 6px;
+            font-size: 12px; text-decoration: none; border-radius: 6px;
+            color: #b0a090; opacity: 0.55; cursor: pointer; user-select: none;
+        }
+        .tree-download:hover { opacity: 1; background: #efe6d8; color: #5a4a3a; }
 
         .tree-retry {
             margin: 10px 6px; padding: 6px 16px;
@@ -591,7 +599,7 @@
 
             let entries = (body.tree || [])
                 .filter(e => e.type === 'blob' || e.type === 'tree')
-                .filter(e => e.path !== '.git' && !e.path.startsWith('.git/'));
+                .filter(e => !e.path.split('/').some(seg => seg.startsWith('.')));
 
             // 模式2：只保留主页仓库中该文件夹下的内容
             if (src.mode === 2 && src.basePath) {
@@ -618,10 +626,13 @@
             // 保存查询结果到缓存（localStorage + 尝试写入远端 project.json），下次无需再调 API
             saveProjectJsonCache(treeEntriesToProjectJson(entries, src));
         } catch (err) {
+            const isFileProtocol = window.location.protocol === 'file:';
             navTree.innerHTML = `
                 <div class="tree-note">⚠️ 目录加载失败</div>
                 <div class="tree-note" style="color:#c44">${err.message}</div>
-                <div class="tree-note">已尝试：project.json、同名仓库 ${ghUser}/${repoName} 与主页仓库 ${ghUser}.github.io/${repoName}。请确认项目已部署（生成 project.json）或仓库为公开，或稍后重试（GitHub API 有访问频率限制）。</div>
+                ${isFileProtocol
+                    ? '<div class="tree-note">本地模式：浏览器不允许直接读取本地文件目录。请用本地服务器打开（进入本目录后运行 <b>python -m http.server</b>，再访问 http://localhost:8000/），或部署到 GitHub Pages 后查看。<b>文件预览与下载功能不受影响</b>。</div>'
+                    : `<div class="tree-note">已尝试：project.json、同名仓库 ${ghUser}/${repoName} 与主页仓库 ${ghUser}.github.io/${repoName}。请确认项目已部署（生成 project.json）或仓库为公开，或稍后重试（GitHub API 有访问频率限制）。</div>`}
                 <button id="tree-retry" class="tree-retry">重试</button>`;
             const retry = document.getElementById('tree-retry');
             if (retry) retry.addEventListener('click', () => loadTree());
@@ -679,7 +690,7 @@
             const body = await res.json().catch(() => ({}));
             let entries = (body.tree || [])
                 .filter(e => e.type === 'blob' || e.type === 'tree')
-                .filter(e => e.path !== '.git' && !e.path.startsWith('.git/'));
+                .filter(e => !e.path.split('/').some(seg => seg.startsWith('.')));
             if (src.mode === 2 && src.basePath) {
                 const prefix = src.basePath + '/';
                 entries = entries
@@ -746,25 +757,32 @@
         } else {
             const isHtml = /\.html?$/i.test(node.name);
             const a = document.createElement('a');
-            a.className = 'tree-file' + (isHtml ? ' html' : ' plain');
-            if (isHtml) {
-                a.href = pageBase + encodePath(node.path);
-                a.title = '打开 ' + node.path;
-                a.addEventListener('click', (ev) => {
-                    ev.preventDefault();
-                    if (node.path === 'index.html') {
-                        // 根 index.html 是本加载器，整页跳转到项目根地址
-                        window.location.href = pageBase;
-                        return;
-                    }
-                    openPage(node.path);
-                });
-            }
+            a.className = 'tree-file' + (isHtml ? ' html' : ' file');
+            a.href = pageBase + encodePath(node.path);
+            a.title = '预览 ' + node.path;
+            a.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                if (node.path === 'index.html') {
+                    // 根 index.html 是本加载器，整页跳转到项目根地址
+                    window.location.href = pageBase;
+                    return;
+                }
+                openPage(node.path); // HTML 与文本/图片/PDF 等均在右侧内容区预览
+            });
             const fname = document.createElement('span');
             fname.className = 'fname';
             fname.textContent = (isHtml ? '📄 ' : '📎 ') + node.name;
             a.appendChild(fname);
             li.appendChild(a);
+            li.classList.add('file-item');
+            // 下载按钮：部署到 GitHub Pages 与本地 (file://) 下均可用
+            const dl = document.createElement('a');
+            dl.className = 'tree-download';
+            dl.href = pageBase + encodePath(node.path);
+            dl.download = node.name;
+            dl.title = '下载 ' + node.path;
+            dl.textContent = '⤓';
+            li.appendChild(dl);
         }
         return li;
     }
